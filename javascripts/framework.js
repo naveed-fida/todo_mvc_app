@@ -1,11 +1,14 @@
 function ModelConstructor(options) {
   var id_count = 0;
+  options = options || {};
+
   function Model(attrs) {
     id_count++;
     var self = this;
     self.attributes = attrs || {};
-    self.id = id_count;
     self.attributes.id = id_count;
+    self.id = id_count;
+    this.__events = [];
 
     if (options && options.change && _.isFunction(options.change)) {
       self.__events.push(options.change);
@@ -13,8 +16,6 @@ function ModelConstructor(options) {
   }
 
   Model.prototype = {
-    __events: [],
-
     __remove: function() {},
 
     set: function(key, value) {
@@ -24,7 +25,6 @@ function ModelConstructor(options) {
 
     get: function(key) {
       return this.attributes[key];
-      this.triggerChange();
     },
 
     remove: function(key) {
@@ -33,8 +33,9 @@ function ModelConstructor(options) {
     },
 
     triggerChange: function() {
-      this.__events.forEach(function(cb) {
-        cb();
+      var self = this; // not in vids
+      self.__events.forEach(function(cb) {
+        cb.call(self);
       });
     },
 
@@ -49,6 +50,7 @@ function ModelConstructor(options) {
 }
 
 function CollectionConstructor(options) {
+  options = options || {};
   function Collection(model_constructor) {
     this.models = [];
     this.model = model_constructor;
@@ -64,24 +66,27 @@ function CollectionConstructor(options) {
           new_m;
 
       if (old_m) { return old_m; }
+
       new_m = new this.model(model);
       this.models.push(new_m);
+
       return new_m;
     },
 
-    remove: function(model) {
-      model = _.isNumber(model) ? { id: model } : model;
-      var m = _(this.models).findWhere(model);
+    remove: function(idx) {
+      idx = _.isObject(idx) ? idx.id : idx;
+      var m = this.get(idx);
 
       if (!m) { return; }
 
-      m.__remove();
       this.models = this.models.filter(function(curr_model) {
         return curr_model.id !== m.id;
       });
+      m.__remove();
     },
 
     set: function(models) {
+      this.reset(); // not in vids
       models = _(models).isArray() ? models : [models];
       models.forEach(this.add.bind(this)); 
     },
@@ -96,11 +101,13 @@ function CollectionConstructor(options) {
 }
 
 function ViewConstructor(options) {
+  options = options || {};
   function View(model) {
     this.model = model;
+    this.model.view = this;
     this.model.addCallback(this.render.bind(this));
     this.model.__remove = this.remove.bind(this);
-    this.model.view = this;
+    this.attributes["data-id"] = this.model.id; // not in vids
     this.$el = $('<' + this.tag_name + ' />', this.attributes);
     this.render();
   }
@@ -113,9 +120,9 @@ function ViewConstructor(options) {
     template: function() {},
 
     render: function() {
+      this.unbindEvents();
       this.$el.html(this.template(this.model.attributes));
       this.bindEvents();
-      return this.$el;
     },
 
     bindEvents: function() {
@@ -127,9 +134,9 @@ function ViewConstructor(options) {
         selector = parts.length > 1 ? parts.slice(1).join(' ') : undefined;
         event = parts[0];
         if (selector) {
-          $el.on(event + '.view', selector, this.events[prop].bind(this));
+          $el.on(event + '.view', selector, this.events[prop]); // bind(this) in the vid (wrong)
         } else {
-          $el.on(event + '.view', this.events[prop].bind(this));
+          $el.on(event + '.view', this.events[prop]);
         }
       }
     },
